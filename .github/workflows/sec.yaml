@@ -1,0 +1,87 @@
+name: Security pipeline
+
+on: workflow_call
+
+permissions:
+  contents: read
+  security-events: write
+  issues: write
+
+jobs:
+  sast:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Executar Semgrep e salvar JSON
+        run: |
+          pip install semgrep
+          semgrep scan --config="p/owasp-top-ten" --sarif > semgrep-results.sarif || true
+
+      - name: Upload do semgrep report
+        uses: actions/upload-artifact@v4
+        with:
+          name: semgrep_report
+          path: reports/semgrep_report.sarif
+
+      - name: Cria GitHub Issue caso encontre vulnerabilidades
+        run: |
+          VULNERABILITIES=$(jq '[.runs[].results | length] | add' reports/semgrep_report.sarif || echo 0)
+          echo "Total vulnerabilities detected: $VULNERABILITIES"
+          
+          if [ "$VULNERABILITIES" -gt 0 ]; then
+            gh issue create \
+              --title "🚨 Semgrep Security Scan Found $VULNERABILITIES Issues" \
+              --body "O scanner de segurança detectou **$VULNERABILITIES** vulnerabilidades.\n\nVerifique o relatório completo: [Clique Aqui](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})" \
+              --label "security" \
+              --repo ${{ github.repository }}
+          fi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: 🔍 Analisar SARIF e bloquear pipeline se houver vulnerabilidades
+        continue-on-error: true
+        run: |
+          VULNERABILITIES=$(jq '[.runs[].results | length] | add' reports/semgrep_report.sarif || echo 0)
+          echo "Total vulnerabilities detected: $VULNERABILITIES"
+          
+          if [ "$VULNERABILITIES" -gt 0 ]; then
+            echo "❌ Security Gate: Vulnerabilities found! Blocking pipeline."
+            exit 1
+          fi
+
+      - name: Upload do SARIF results para o GitHub Security Tab
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: reports/semgrep_report.sarif
+          category: "semgrep"
+          checkout_path: ${{ github.workspace }}
+
+      - name: Garantir que a label 'security' existe
+        run: |
+          gh label create "security" --description "Security vulnerabilities" --color FF0000 || echo "Label already exists"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+  sca:
+    runs-on: ubuntu-latest
+    needs: sast
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Roda scan SCA Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          severity: HIGH,CRITICAL
+          exit-code: 1
+          ignore-unfixed: true
+          format: sarif
+          output: trivy-results.sarif
+
+      - name: Upload SARIF to GitHub Security tab
+        uses: github/codeql-action/upload-sarif@v2
+        with:
+          sarif_file: trivy-results.sarif
