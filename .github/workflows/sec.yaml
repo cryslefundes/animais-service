@@ -2,11 +2,6 @@ name: Security pipeline
 
 on: workflow_call
 
-permissions:
-  contents: read
-  security-events: write
-  issues: write
-
 jobs:
   sast:
     runs-on: ubuntu-latest
@@ -14,16 +9,16 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Executar Semgrep e salvar JSON
+      - name: Executar Semgrep e salvar SARIF
         run: |
           pip install semgrep
-          semgrep scan --config="p/owasp-top-ten" --sarif > semgrep-results.sarif || true
+          semgrep scan --config="p/ci" --sarif > semgrep_report.sarif || true
 
       - name: Upload do semgrep report
         uses: actions/upload-artifact@v4
         with:
           name: semgrep_report
-          path: reports/semgrep_report.sarif
+          path: semgrep_report.sarif
 
       - name: Cria GitHub Issue caso encontre vulnerabilidades
         run: |
@@ -54,7 +49,7 @@ jobs:
       - name: Upload do SARIF results para o GitHub Security Tab
         uses: github/codeql-action/upload-sarif@v3
         with:
-          sarif_file: reports/semgrep_report.sarif
+          sarif_file: semgrep_report.sarif
           category: "semgrep"
           checkout_path: ${{ github.workspace }}
 
@@ -82,6 +77,6 @@ jobs:
           output: trivy-results.sarif
 
       - name: Upload SARIF to GitHub Security tab
-        uses: github/codeql-action/upload-sarif@v2
+        uses: github/codeql-action/upload-sarif@v3
         with:
           sarif_file: trivy-results.sarif
