@@ -38,6 +38,10 @@ jobs:
     needs: test
     uses: ./.github/workflows/sec.yaml
     secrets: inherit
+    permissions:
+      contents: read
+      security-events: write
+      issues: write
 
   build:
     runs-on: ubuntu-latest
